@@ -1,0 +1,42 @@
+[package]
+name = "atmos-album-builder"
+version = "0.4.0"
+description = "Build chaptered MKV albums from Dolby Atmos M4A files"
+authors = ["Thiago"]
+edition = "2021"
+
+[lib]
+name = "atmos_album_builder_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["protocol-asset"] }
+tauri-plugin-dialog = "2"
+tauri-plugin-log = "2"
+tauri-plugin-process = "2.3.1"
+tauri-plugin-updater = "2.10.1"
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["process", "fs", "sync", "macros", "io-util", "time"] }
+walkdir = "2"
+uuid = { version = "1", features = ["v4", "serde"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+dirs = "6"
+
+[dev-dependencies]
+tempfile = "3"
+
+# The current macOS Rust/ld toolchain produces malformed optimized proc-macro
+# dylibs in release mode. The media work is performed by FFmpeg, so an
+# unoptimized application binary is an acceptable packaging workaround.
+[profile.release]
+opt-level = 0
+debug = true
+debug-assertions = true
+overflow-checks = true
+incremental = true
+codegen-units = 256
