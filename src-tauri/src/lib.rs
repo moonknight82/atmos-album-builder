@@ -96,11 +96,46 @@ fn hidden(root: &Path, path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-fn is_m4a(path: &Path) -> bool {
+fn is_supported_audio(path: &Path) -> bool {
     path.extension()
         .and_then(|extension| extension.to_str())
-        .map(|extension| extension.eq_ignore_ascii_case("m4a"))
+        .map(|extension| {
+            extension.eq_ignore_ascii_case("m4a") || extension.eq_ignore_ascii_case("mka")
+        })
         .unwrap_or(false)
+}
+
+fn image_attachment_extension(stream: &Value) -> Option<String> {
+    if stream["codec_type"].as_str() != Some("attachment") {
+        return None;
+    }
+    let empty = Map::new();
+    let tags = stream["tags"].as_object().unwrap_or(&empty);
+    let mime = tag(tags, &["mimetype", "mime_type"])
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let filename = tag(tags, &["filename"]).unwrap_or("");
+    let extension = Path::new(filename)
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let detected = match mime.as_str() {
+        "image/jpeg" | "image/jpg" => Some("jpg"),
+        "image/png" => Some("png"),
+        "image/webp" => Some("webp"),
+        "image/tiff" => Some("tiff"),
+        "image/bmp" => Some("bmp"),
+        _ => match extension.as_str() {
+            "jpg" | "jpeg" => Some("jpg"),
+            "png" => Some("png"),
+            "webp" => Some("webp"),
+            "tif" | "tiff" => Some("tiff"),
+            "bmp" => Some("bmp"),
+            _ => None,
+        },
+    }?;
+    Some(detected.into())
 }
 
 fn natural_key(value: &str) -> Vec<String> {
@@ -186,8 +221,9 @@ async fn probe_track(path: &Path) -> Result<AlbumTrack, String> {
         .find(|stream| stream["codec_type"].as_str() == Some("audio"))
         .ok_or_else(|| format!("No audio stream found in {}", path.display()))?;
     let has_embedded_cover = streams.iter().any(|stream| {
-        stream["codec_type"].as_str() == Some("video")
-            && stream["disposition"]["attached_pic"].as_i64() == Some(1)
+        (stream["codec_type"].as_str() == Some("video")
+            && stream["disposition"]["attached_pic"].as_i64() == Some(1))
+            || image_attachment_extension(stream).is_some()
     });
     let empty = Map::new();
     let format_tags = json["format"]["tags"].as_object().unwrap_or(&empty);
@@ -347,7 +383,7 @@ fn individual_output_filename(index: usize, total: usize, track: &AlbumTrack) ->
 fn compatibility_issues(album: &AlbumJob) -> Vec<String> {
     let mut issues = vec![];
     if album.tracks.is_empty() {
-        issues.push("No M4A tracks were found".into());
+        issues.push("No M4A or MKA tracks were found".into());
         return issues;
     }
     if album.tracks.iter().any(|track| track.duration_ms == 0) {
@@ -459,6 +495,7 @@ fn cover_cache_path(album_id: &str) -> Result<PathBuf, String> {
 
 async fn extract_cover(track: &AlbumTrack, album_id: &str) -> Result<PathBuf, String> {
     let target = cover_cache_path(album_id)?;
+    let _ = fs::remove_file(&target);
     let output = Command::new(media_binary("ffmpeg"))
         .args(["-hide_banner", "-loglevel", "error", "-y", "-i"])
         .arg(&track.path)
@@ -467,13 +504,60 @@ async fn extract_cover(track: &AlbumTrack, album_id: &str) -> Result<PathBuf, St
         .output()
         .await
         .map_err(|error| format!("FFmpeg is unavailable: {error}"))?;
-    if !output.status.success() || !target.is_file() {
-        return Err(format!(
-            "Could not extract embedded artwork from {}",
-            track.file_name
-        ));
+    if output.status.success() && target.is_file() {
+        return Ok(target);
     }
-    Ok(target)
+
+    let probe = Command::new(media_binary("ffprobe"))
+        .args(["-v", "error", "-show_streams", "-of", "json"])
+        .arg(&track.path)
+        .output()
+        .await
+        .map_err(|error| format!("FFprobe is unavailable: {error}"))?;
+    if probe.status.success() {
+        let json: Value = serde_json::from_slice(&probe.stdout).map_err(|e| e.to_string())?;
+        if let Some((stream_index, extension)) = json["streams"].as_array().and_then(|streams| {
+            streams.iter().find_map(|stream| {
+                Some((
+                    stream["index"].as_u64()?,
+                    image_attachment_extension(stream)?,
+                ))
+            })
+        }) {
+            let attachment =
+                target.with_file_name(format!("{album_id}-attachment-{stream_index}.{extension}"));
+            let dump_option = format!("-dump_attachment:{stream_index}");
+            let dumped = Command::new(media_binary("ffmpeg"))
+                .args(["-hide_banner", "-loglevel", "error", "-y"])
+                .arg(dump_option)
+                .arg(&attachment)
+                .args(["-i"])
+                .arg(&track.path)
+                .args(["-map", "0:a:0", "-c:a", "copy", "-f", "streamhash", "-"])
+                .output()
+                .await
+                .map_err(|error| format!("FFmpeg is unavailable: {error}"))?;
+            if dumped.status.success() && attachment.is_file() {
+                let converted = Command::new(media_binary("ffmpeg"))
+                    .args(["-hide_banner", "-loglevel", "error", "-y", "-i"])
+                    .arg(&attachment)
+                    .args(["-frames:v", "1"])
+                    .arg(&target)
+                    .output()
+                    .await
+                    .map_err(|error| format!("FFmpeg is unavailable: {error}"))?;
+                let _ = fs::remove_file(&attachment);
+                if converted.status.success() && target.is_file() {
+                    return Ok(target);
+                }
+            }
+            let _ = fs::remove_file(&attachment);
+        }
+    }
+    Err(format!(
+        "Could not extract embedded artwork from {}",
+        track.file_name
+    ))
 }
 
 async fn image_is_readable(path: &Path) -> bool {
@@ -612,7 +696,10 @@ async fn scan_root(app: tauri::AppHandle, root: String) -> Result<Vec<AlbumJob>,
         .into_iter()
         .filter_map(Result::ok)
     {
-        if entry.file_type().is_file() && !hidden(&root, entry.path()) && is_m4a(entry.path()) {
+        if entry.file_type().is_file()
+            && !hidden(&root, entry.path())
+            && is_supported_audio(entry.path())
+        {
             if let Some(parent) = entry.path().parent() {
                 grouped
                     .entry(parent.to_path_buf())
@@ -1352,6 +1439,25 @@ mod tests {
         let mut values = vec!["10 Song", "2 Song", "1 Song"];
         values.sort_by_key(|value| natural_key(value));
         assert_eq!(values, vec!["1 Song", "2 Song", "10 Song"]);
+    }
+
+    #[test]
+    fn supported_audio_extensions_are_case_insensitive() {
+        assert!(is_supported_audio(Path::new("track.m4a")));
+        assert!(is_supported_audio(Path::new("track.MKA")));
+        assert!(!is_supported_audio(Path::new("track.mkv")));
+    }
+
+    #[test]
+    fn recognizes_image_attachments_as_embedded_covers() {
+        let attachment = serde_json::json!({
+            "codec_type": "attachment",
+            "tags": { "filename": "cover.png", "mimetype": "image/png" }
+        });
+        assert_eq!(
+            image_attachment_extension(&attachment).as_deref(),
+            Some("png")
+        );
     }
 
     #[test]

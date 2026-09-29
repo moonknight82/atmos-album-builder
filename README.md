@@ -1,14 +1,14 @@
 # Atmos Album Builder
 
 Atmos Album Builder is a local-first macOS application for turning folders of
-Dolby Atmos M4A tracks into chaptered album MKVs or verified individual MKVs. It stream-copies the audio,
+Dolby Atmos M4A or MKA tracks into chaptered album MKVs or verified individual MKVs. It stream-copies the audio,
 adds a 1920×1080 still-image or looping animation video track, writes editable album metadata, and
 verifies that the compressed audio packet hash is unchanged before committing
 the output.
 
 ## Workflow
 
-1. Add a library root. Every visible folder directly containing .m4a files
+1. Add a library root. Every visible folder directly containing `.m4a` or `.mka` files
    becomes an album.
 2. Review album metadata and choose embedded artwork, a custom image, or a
    looping MP4/MOV animation.
@@ -53,7 +53,7 @@ are installed.
 
 To publish a release, update the matching version in `package.json`,
 `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json`, then push a tag such as
-`v0.4.0`. The release workflow builds the Apple Silicon app and DMG, signs the
+`v0.5.0`. The release workflow builds the Apple Silicon app and DMG, signs the
 updater bundle with the `TAURI_SIGNING_PRIVATE_KEY` repository secret, generates
 `latest.json`, and publishes the GitHub release only after all assets upload.
 

@@ -67,7 +67,7 @@ export default function App() {
   const [progress, setProgress] = useState<Record<string, ExportProgress>>({});
   const [preview, setPreview] = useState<OutputPreview>();
   const [draggedTrackId, setDraggedTrackId] = useState<string>();
-  const [appVersion, setAppVersion] = useState("0.4.0");
+  const [appVersion, setAppVersion] = useState("0.5.0");
   const [updateAvailable, setUpdateAvailable] = useState<Update | null>(null);
   const [updateVisible, setUpdateVisible] = useState(false);
   const [updateChecking, setUpdateChecking] = useState(false);
@@ -124,7 +124,7 @@ export default function App() {
   async function addFolder() {
     const root = await api.chooseRoot();
     if (!root) return;
-    setBusy("Scanning folders and reading M4A metadata…"); setNotice("");
+    setBusy("Scanning folders and reading audio metadata…"); setNotice("");
     try {
       const found = await api.scanRoot(root);
       const existing = new Set(albums.map((item) => item.sourceFolder));
@@ -134,7 +134,7 @@ export default function App() {
       setNotice(additions.length
         ? "Added " + additions.length + (additions.length === 1 ? " album" : " albums") + " from " + basename(root) + "."
         : found.length ? "Every discovered album is already in the queue."
-        : "No folders containing M4A files were found.");
+        : "No folders containing M4A or MKA files were found.");
     } catch (error) { setNotice(String(error)); }
     finally { setBusy(""); }
   }
@@ -382,7 +382,7 @@ export default function App() {
           <div className="sidebar-head"><div><span className="eyebrow">Review queue</span><h1>{albums.length} albums</h1></div>
             <button className="icon-button accent" onClick={addFolder} disabled={Boolean(busy)} title="Add a root folder"><FolderOpen /></button>
           </div>
-          {!albums.length ? <button className="empty-queue" onClick={addFolder}><div><Library /></div><strong>Add your album library</strong><span>Every subfolder containing M4A files becomes an album.</span></button>
+          {!albums.length ? <button className="empty-queue" onClick={addFolder}><div><Library /></div><strong>Add your album library</strong><span>Every subfolder containing M4A or MKA files becomes an album.</span></button>
           : <div className="album-list">{albums.map((item) => {
             const p = progress[item.id];
             return <button key={item.id} className={"album-row " + (selectedId === item.id ? "selected" : "")} onClick={() => setSelectedId(item.id)}>

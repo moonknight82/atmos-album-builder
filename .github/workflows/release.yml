@@ -45,6 +45,8 @@ jobs:
           tagName: v__VERSION__
           releaseName: Atmos Album Builder v__VERSION__
           releaseBody: |
+            Adds MKA album input alongside M4A, including metadata probing, stream-copy export, and embedded Matroska cover artwork handling.
+
             See the assets below to install Atmos Album Builder. Existing installations can update from inside the app.
           releaseDraft: true
           prerelease: false
